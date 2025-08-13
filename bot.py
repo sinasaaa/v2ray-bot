@@ -1,144 +1,61 @@
-# bot.py
-import logging
-import sqlite3
+# فرض می‌کنیم sqlite و جدول panels آماده است
+# جدول panels: id | name | base_url | username | password
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    MessageHandler,
-    filters
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
 )
-from config import TELEGRAM_TOKEN, INITIAL_ADMIN_ID, DB_PATH
-from pyxui import XUI
-from pyxui.errors import BadLogin
+import sqlite3
 
-# تنظیمات لاگ
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+DB_PATH = "database.db"
+ADMIN_IDS = [6133982340]  # شناسه ادمین اولیه
 
-# بررسی اینکه کاربر ادمین هست
 async def is_admin(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM admins WHERE user_id=?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-    return result is not None
+    return user_id in ADMIN_IDS
 
-# شروع ربات
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    admin = await is_admin(user.id)
-
-    if admin:
-        text = f"سلام ادمین {user.first_name}!\nمدیریت ربات در دسترس است."
-        keyboard = [
-            [InlineKeyboardButton("مدیریت محصولات", callback_data="manage_products")],
-            [InlineKeyboardButton("مدیریت پنل‌ها", callback_data="manage_panels")]
-        ]
+    if await is_admin(user.id):
+        keyboard = [[InlineKeyboardButton("افزودن پنل", callback_data="add_panel")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("سلام ادمین!", reply_markup=reply_markup)
     else:
-        text = f"سلام {user.first_name}!\nبرای مشاهده محصولات از دکمه‌ها استفاده کنید."
-        keyboard = [
-            [InlineKeyboardButton("مشاهده محصولات", callback_data="show_products")]
-        ]
+        await update.message.reply_text("سلام کاربر!")
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, reply_markup=reply_markup)
-
-# اتصال به پنل
-def connect_panel(panel):
-    xui = XUI(full_address=panel['base_url'])
-    try:
-        xui.login(panel['username'], panel['password'])
-        return xui
-    except BadLogin:
-        return None
-
-# فرمان اضافه کردن پنل
-async def add_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not await is_admin(user.id):
-        await update.message.reply_text("دسترسی ندارید!")
-        return
-
-    if len(context.args) != 4:
-        await update.message.reply_text(
-            "استفاده صحیح: /addpanel <name> <base_url> <username> <password>"
-        )
-        return
-
-    name, base_url, username, password = context.args
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO panels (name, base_url, username, password) VALUES (?, ?, ?, ?)",
-        (name, base_url, username, password)
-    )
-    conn.commit()
-    conn.close()
-    await update.message.reply_text(f"پنل {name} با موفقیت اضافه شد!")
-
-# دکمه‌ها و مدیریت پنل‌ها
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # این خط ضروریه
     user = query.from_user
-    admin = await is_admin(user.id)
 
-    if query.data == "manage_panels" and admin:
-        # لیست پنل‌ها از DB
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT id, name FROM panels")
-        panels = c.fetchall()
-        conn.close()
+    if query.data == "add_panel" and await is_admin(user.id):
+        await query.edit_message_text("لطفا اطلاعات پنل را به این شکل ارسال کنید:\n\nنام پنل | لینک پنل | نام کاربری | رمز عبور")
+        # پرچم دریافت اطلاعات پنل
+        context.user_data["adding_panel"] = True
 
-        keyboard = []
-        for panel_id, name in panels:
-            keyboard.append([InlineKeyboardButton(name, callback_data=f"panel_{panel_id}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("پنل‌ها:", reply_markup=reply_markup)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if context.user_data.get("adding_panel") and await is_admin(user.id):
+        text = update.message.text
+        try:
+            name, base_url, username, password = [x.strip() for x in text.split("|")]
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT INTO panels (name, base_url, username, password) VALUES (?, ?, ?, ?)",
+                      (name, base_url, username, password))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"پنل {name} با موفقیت اضافه شد ✅")
+        except Exception as e:
+            await update.message.reply_text(f"خطا در افزودن پنل ❌\nلطفا فرمت درست را استفاده کنید.\n\nمثال:\nپنل تست | https://example.com | user | pass")
+        finally:
+            context.user_data["adding_panel"] = False
 
-    elif query.data.startswith("panel_") and admin:
-        panel_id = int(query.data.split("_")[1])
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT name, base_url, username, password FROM panels WHERE id=?", (panel_id,))
-        panel = c.fetchone()
-        conn.close()
-
-        if panel:
-            name, base_url, username, password = panel
-            xui = connect_panel({
-                "base_url": base_url,
-                "username": username,
-                "password": password
-            })
-            if xui:
-                await query.edit_message_text(f"پنل {name} با موفقیت وصل شد!\n(اینجا می‌تونی عملیات مدیریتی اضافه کنی)")
-            else:
-                await query.edit_message_text(f"اتصال به پنل {name} موفق نبود! نام کاربری یا رمز اشتباه است.")
-        else:
-            await query.edit_message_text("پنل پیدا نشد!")
-
-    else:
-        await query.edit_message_text("دسترسی ندارید!")
-
-# اجرای ربات
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
+    app = ApplicationBuilder().token("BOT_TOKEN_HERE").build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addpanel", add_panel))
     app.add_handler(CallbackQueryHandler(button))
-
-    print("Bot started...")
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
 
 if __name__ == "__main__":
