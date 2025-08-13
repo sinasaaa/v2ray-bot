@@ -35,18 +35,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    print(f"[DEBUG] پیام از کاربر {user.id}: {update.message.text}")
-    print(f"[DEBUG] وضعیت adding_panel: {context.user_data.get('adding_panel')}")
-
     if context.user_data.get("adding_panel") and await is_admin(user.id):
         text = update.message.text
         try:
             parts = [x.strip() for x in text.split("|")]
-            if len(parts) != 4:
-                raise ValueError("فرمت پیام اشتباه است")
+            if len(parts) < 4:
+                await update.message.reply_text(
+                    "فرمت اشتباه است، لطفا دوباره ارسال کنید.\n\n"
+                    "مثال:\nپنل تست | https://example.com | user | pass"
+                )
+                return
 
-            name, base_url, username, password = parts
-            print(f"[DEBUG] در حال اضافه کردن پنل: {name}, {base_url}, {username}, {password}")
+            name = parts[0]
+            base_url = parts[1]
+            username = parts[2]
+            password = "|".join(parts[3:])  # پشتیبانی از | در رمز عبور
 
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
@@ -56,28 +59,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             conn.commit()
             conn.close()
+
             await update.message.reply_text(f"پنل {name} با موفقیت اضافه شد ✅")
-            print(f"[DEBUG] ثبت پنل موفقیت آمیز بود")
         except Exception as e:
             await update.message.reply_text(
-                "خطا در افزودن پنل ❌\n"
-                "لطفا فرمت درست را استفاده کنید.\n\nمثال:\n"
-                "پنل تست | https://example.com | user | pass"
+                f"خطا در افزودن پنل ❌\n{e}\n"
+                "لطفا فرمت درست را استفاده کنید."
             )
-            print(f"[DEBUG] خطا در ثبت پنل: {e}")
         finally:
             context.user_data["adding_panel"] = False
 
 def main():
-    # توکن واقعی باتت رو اینجا قرار بده
-    BOT_TOKEN = "TELEGRAM_TOKEN"
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("[INFO] ربات شروع به کار کرد...")
     app.run_polling()
 
 if __name__ == "__main__":
