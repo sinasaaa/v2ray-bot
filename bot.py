@@ -53,14 +53,49 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     admin = await is_admin(user.id)
 
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
     if query.data == "manage_products" and admin:
-        await query.edit_message_text("صفحه مدیریت محصولات")
+        # نمایش لیست محصولات برای ادمین
+        c.execute("SELECT id, name, price FROM products")
+        products = c.fetchall()
+        if products:
+            text = "لیست محصولات:\n"
+            for p in products:
+                text += f"{p[0]} - {p[1]} ({p[2]} تومان)\n"
+        else:
+            text = "محصولی موجود نیست."
+        await query.edit_message_text(text)
+        
     elif query.data == "manage_panels" and admin:
-        await query.edit_message_text("صفحه مدیریت پنل‌ها")
+        # نمایش لیست پنل‌ها برای ادمین
+        c.execute("SELECT id, name, base_url FROM panels")
+        panels = c.fetchall()
+        if panels:
+            text = "لیست پنل‌ها:\n"
+            for p in panels:
+                text += f"{p[0]} - {p[1]} ({p[2]})\n"
+        else:
+            text = "پنلی موجود نیست."
+        await query.edit_message_text(text)
+        
     elif query.data == "show_products":
-        await query.edit_message_text("لیست محصولات برای مشتری")
+        # نمایش محصولات به مشتری
+        c.execute("SELECT name, price FROM products")
+        products = c.fetchall()
+        if products:
+            text = "لیست محصولات:\n"
+            for p in products:
+                text += f"{p[0]} - {p[1]} تومان\n"
+        else:
+            text = "محصولی موجود نیست."
+        await query.edit_message_text(text)
+        
     else:
         await query.edit_message_text("دسترسی ندارید!")
+
+    conn.close()
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
