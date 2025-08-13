@@ -1,6 +1,4 @@
-# فرض می‌کنیم sqlite و جدول panels آماده است
-# جدول panels: id | name | base_url | username | password
-
+from config import TELEGRAM_TOKEN
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -25,37 +23,61 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()  # این خط ضروریه
+    await query.answer()
     user = query.from_user
 
     if query.data == "add_panel" and await is_admin(user.id):
-        await query.edit_message_text("لطفا اطلاعات پنل را به این شکل ارسال کنید:\n\nنام پنل | لینک پنل | نام کاربری | رمز عبور")
-        # پرچم دریافت اطلاعات پنل
+        await query.edit_message_text(
+            "لطفا اطلاعات پنل را به این شکل ارسال کنید:\n\n"
+            "نام پنل | لینک پنل | نام کاربری | رمز عبور"
+        )
         context.user_data["adding_panel"] = True
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    print(f"[DEBUG] پیام از کاربر {user.id}: {update.message.text}")
+    print(f"[DEBUG] وضعیت adding_panel: {context.user_data.get('adding_panel')}")
+
     if context.user_data.get("adding_panel") and await is_admin(user.id):
         text = update.message.text
         try:
-            name, base_url, username, password = [x.strip() for x in text.split("|")]
+            parts = [x.strip() for x in text.split("|")]
+            if len(parts) != 4:
+                raise ValueError("فرمت پیام اشتباه است")
+
+            name, base_url, username, password = parts
+            print(f"[DEBUG] در حال اضافه کردن پنل: {name}, {base_url}, {username}, {password}")
+
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute("INSERT INTO panels (name, base_url, username, password) VALUES (?, ?, ?, ?)",
-                      (name, base_url, username, password))
+            c.execute(
+                "INSERT INTO panels (name, base_url, username, password) VALUES (?, ?, ?, ?)",
+                (name, base_url, username, password)
+            )
             conn.commit()
             conn.close()
             await update.message.reply_text(f"پنل {name} با موفقیت اضافه شد ✅")
+            print(f"[DEBUG] ثبت پنل موفقیت آمیز بود")
         except Exception as e:
-            await update.message.reply_text(f"خطا در افزودن پنل ❌\nلطفا فرمت درست را استفاده کنید.\n\nمثال:\nپنل تست | https://example.com | user | pass")
+            await update.message.reply_text(
+                "خطا در افزودن پنل ❌\n"
+                "لطفا فرمت درست را استفاده کنید.\n\nمثال:\n"
+                "پنل تست | https://example.com | user | pass"
+            )
+            print(f"[DEBUG] خطا در ثبت پنل: {e}")
         finally:
             context.user_data["adding_panel"] = False
 
 def main():
-    app = ApplicationBuilder().token("BOT_TOKEN_HERE").build()
+    # توکن واقعی باتت رو اینجا قرار بده
+    BOT_TOKEN = "TELEGRAM_TOKEN"
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("[INFO] ربات شروع به کار کرد...")
     app.run_polling()
 
 if __name__ == "__main__":
